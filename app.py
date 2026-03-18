@@ -118,7 +118,7 @@ if analyze:
                 
                 # Theme Generation
                 theme_prompt = f"""
-                Extract exactly 5 keywords from the following summary. 
+                Extract exactly 5 keywords from the summary. 
                 Prioritize: 
                 - Catholic Liturgical times (Christmas, Lent, Advent, etc.)
                 - Catholic Spiritual themes (Eucharist, Martyrdom, Suffering, God's love, etc.)
