@@ -6,6 +6,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from dotenv import load_dotenv
 import requests
 import re
+from urllib.parse import urlparse, parse_qs
 
 load_dotenv()
 
@@ -21,47 +22,51 @@ def get_video_content(url):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     }
 
-    # Try standard extraction first
-    try:
-        ydl_opts = {'skip_download': True, 'quiet': True, 'noplaylist': True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title')
-            description = info.get('description', '')
-            
-            # YouTube specific transcript logic
-            transcript = ""
-            if "youtube" in url or "youtu.be" in url:
-                try:
-                    video_id = info.get('id')
-                    t_list = YouTubeTranscriptApi.get_transcript(video_id)
-                    transcript = " ".join([i["text"] for i in t_list])
-                except: pass
-            
-            if title:
-                return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
-    except Exception as e:
-        # This is where the XML error is caught
-        print(f"Standard extractor failed: {e}")
+    # 1. VIMEO PLAYER TRANSFORMER
+    if "player.vimeo.com/video/" in url:
+        video_id = url.split("/")[-1].split("?")[0]
+        url = f"https://vimeo.com/{video_id}"
 
-    # --- MANUAL FALLBACK (The Vimeo 'Secret Door') ---
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        # We use Regex to 'pluck' the title and description from the raw HTML code
-        title_search = re.search(r'<title>(.*?)</title>', response.text)
-        # Vimeo usually hides the description in a meta tag
-        desc_search = re.search(r'<meta name="description" content="(.*?)">', response.text)
-        
-        title = title_search.group(1) if title_search else "Unknown Video"
-        description = desc_search.group(1) if desc_search else "No description available in HTML."
-        
-        # Clean up any HTML entities like &amp; or &quot;
-        title = title.replace("on Vimeo", "").strip()
-        
-        return f"TITLE: {title}\n\nDESC: {description}\n\n(Note: Metadata fetched via direct HTML scrape)"
-    except Exception as e:
-        return f"FETCH_ERROR: Both standard and manual fetch failed. {str(e)}"
+    # 2. YOUTUBE LOGIC (Bypassing yt-dlp's JS dependency)
+    if "youtube.com" in url or "youtu.be" in url:
+        video_id = ""
+        if "youtu.be" in url:
+            video_id = url.split("/")[-1]
+        else:
+            query = urlparse(url).query
+            video_id = parse_qs(query).get("v", [""])[0]
+
+        # Try to get transcript directly (This doesn't need a JS runtime)
+        transcript = ""
+        try:
+            t_list = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript = " ".join([i["text"] for i in t_list])
+        except Exception as e:
+            print(f"Transcript failed: {e}")
+
+        # If transcript failed, we scrape the page for Title/Desc using requests
+        # to avoid the 'No JS Runtime' error in yt-dlp
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            title = re.search(r'<title>(.*?)</title>', response.text).group(1).replace(" - YouTube", "")
+            # Return what we found
+            return f"TITLE: {title}\n\nTRANSCRIPT: {transcript if transcript else 'No transcript available. Use title for context.'}"
+        except:
+            return "FETCH_ERROR: Could not reach YouTube metadata."
+
+    # 3. VIMEO LOGIC (Direct Scrape)
+    if "vimeo.com" in url:
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            title_match = re.search(r'<title>(.*?)</title>', response.text)
+            desc_match = re.search(r'<meta name="description" content="(.*?)">', response.text)
+            title = title_match.group(1).replace("on Vimeo", "").strip() if title_match else "Vimeo Video"
+            description = desc_match.group(1) if desc_match else "No description found."
+            return f"TITLE: {title}\n\nDESC: {description}"
+        except Exception as e:
+            return f"FETCH_ERROR (Vimeo): {str(e)}"
+
+    return "FETCH_ERROR: Unsupported URL format."
 
 # --- UI ---
 url_input = st.text_input("Enter Video Link:")
