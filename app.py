@@ -11,7 +11,7 @@ import vimeo
 # Ensure these are added to your Streamlit Cloud "Secrets"
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN") # Optional: For private Vimeo access
-MODEL_ID = "gemini-1.5-flash" # Use the stable workhorse
+MODEL_ID = "gemini-3.1-flash-lite-preview" # Use the stable workhorse
 
 st.set_page_config(page_title="Video AI Researcher Pro", page_icon="🎥", layout="wide")
 
