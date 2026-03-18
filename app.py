@@ -11,7 +11,7 @@ API_KEY = st.secrets.get("GEMINI_API_KEY")
 VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN")
 MODEL_ID = "gemini-3.1-flash-lite-preview"
 
-st.set_page_config(page_title="Video Summarizer Pro", page_icon="🎥", layout="wide")
+st.set_page_config(page_title="Video Summarizer", page_icon="🎥", layout="wide")
 
 # --- Custom Styling ---
 st.markdown("""
@@ -39,24 +39,31 @@ def clean_youtube_url(url):
 
 def get_video_content(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
-    clean_url = clean_youtube_url(url)
     
-    # YouTube Logic
-    if "youtube.com" in clean_url or "youtu.be" in clean_url:
-        v_id = clean_url.split("v=")[1]
+    # LOGIC: Use Regex to grab ONLY the 11-character ID. 
+    # This ignores &list=, &index=, and &start_radio=
+    v_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
+    
+    if v_id_match:
+        v_id = v_id_match.group(1)
+        
+        # 1. Fetch Transcript using ONLY the isolated ID
         transcript = ""
         try:
             t_list = YouTubeTranscriptApi.get_transcript(v_id)
             transcript = " ".join([i["text"] for i in t_list])
         except Exception:
             pass
+
+        # 2. Fetch Title using a "Clean" URL (no playlist parameters)
         try:
+            clean_url = f"https://www.youtube.com/watch?v={v_id}"
             res = requests.get(clean_url, headers=headers, timeout=10)
             title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
             return f"TITLE: {title}\n\nCONTENT: {transcript}"
         except Exception:
             return "YouTube Meta Fetch Error."
-    
+
     # Vimeo Logic
     if "vimeo.com" in url:
         v_id = url.split("/")[-1].split("?")[0]
@@ -81,14 +88,14 @@ def reset_all():
     st.session_state.manual_box = ""
 
 # --- UI Layout ---
-st.title("🎥 Video Summarizer Pro")
+st.title("🎥 Video Summarizer")
 st.markdown("---")
 
 col1, col2 = st.columns(2, gap="large")
 
 with col1:
     st.subheader("🔗 Video Source")
-    url_input = st.text_input("Enter Video Link):", key="url_box")
+    url_input = st.text_input("Enter Video Link:", key="url_box")
 
 with col2:
     st.subheader("📝 Additional Context")
