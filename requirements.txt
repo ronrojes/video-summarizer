@@ -1,8 +1,5 @@
 streamlit
-yt-dlp[default]
+yt-dlp
 google-genai
 python-dotenv
 youtube-transcript-api
-google-api-python-client
-requests
-curl_cffi
