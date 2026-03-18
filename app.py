@@ -1,140 +1,123 @@
 import streamlit as st
+import os
 import requests
 import re
-import os
 from urllib.parse import urlparse, parse_qs
 from google import genai
 from youtube_transcript_api import YouTubeTranscriptApi
 import vimeo
 
-# --- CONFIG & SECRETS ---
-# Ensure these are added to your Streamlit Cloud "Secrets"
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
-VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN") # Optional: For private Vimeo access
-MODEL_ID = "gemini-3.1-flash-lite-preview" # Use the stable workhorse
+# --- Setup & Config ---
+API_KEY = st.secrets.get("GEMINI_API_KEY")
+VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN")
+MODEL_ID = "gemini-3.1-flash-lite-preview"
 
-st.set_page_config(page_title="Video AI Researcher Pro", page_icon="🎥", layout="wide")
+st.set_page_config(page_title="Video Summarizer Pro", page_icon="🎥", layout="wide")
 
-# --- DATA FETCHING LOGIC ---
-def get_vimeo_data(video_id):
-    if not VIMEO_TOKEN:
-        return "Vimeo Token missing in secrets."
-    
-    # Initialize the Vimeo Client with your new Token
-    v = vimeo.VimeoClient(token=VIMEO_TOKEN)
-    
-    try:
-        # 1. Fetch Metadata (Title/Description)
-        video_res = v.get(f'/videos/{video_id}')
-        if video_res.status_code != 200:
-            return f"Vimeo Error: {video_res.status_code}. Check if ID {video_id} is correct."
-        
-        data = video_res.json()
-        title = data.get('name', 'Vimeo Video')
-        description = data.get('description', 'No description.')
+# --- Custom Styling for Alignment ---
+st.markdown("""
+    <style>
+    .stTextArea textarea { height: 150px; }
+    .stTextInput input { height: 45px; }
+    div[data-testid="stVerticalBlock"] > div:has(div.stButton) {
+        display: flex;
+        justify-content: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-        # 2. Fetch Transcript (Text Tracks)
-        transcript = ""
-        tracks_res = v.get(f'/videos/{video_id}/texttracks')
-        tracks = tracks_res.json().get('data', [])
-        
-        if tracks:
-            # Get the first track (usually English)
-            link = tracks[0].get('link')
-            if link:
-                transcript_res = requests.get(link)
-                transcript = transcript_res.text
-        
-        return f"TITLE: {title}\nDESC: {description}\nTRANSCRIPT: {transcript}"
-    except Exception as e:
-        return f"Vimeo API Exception: {str(e)}"
+# --- Helper Functions ---
+def clean_youtube_url(url):
+    """Strips playlist parameters to ensure fetching works."""
+    if "youtube.com/watch" in url:
+        parsed = urlparse(url)
+        video_id = parse_qs(parsed.query).get("v", [None])[0]
+        return f"https://www.youtube.com/watch?v={video_id}" if video_id else url
+    return url
 
 def get_video_content(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
+    url = clean_youtube_url(url)
     
-    # --- 1. Vimeo Logic (API + Transformer) ---
-    if "vimeo.com" in url:
-        # Extract ID from player.vimeo.com/video/ID or vimeo.com/ID
-        video_id = url.split("/")[-1].split("?")[0]
-        return get_vimeo_data(video_id)
-
-    # --- 2. YouTube Logic (Lightweight) ---
+    # YouTube Logic
     if "youtube.com" in url or "youtu.be" in url:
-        v_id = ""
-        if "youtu.be" in url: v_id = url.split("/")[-1]
-        else:
-            query = urlparse(url).query
-            v_id = parse_qs(query).get("v", [""])[0]
-
+        v_id = url.split("v=")[1].split("&")[0] if "v=" in url else url.split("/")[-1]
         transcript = ""
         try:
             t_list = YouTubeTranscriptApi.get_transcript(v_id)
             transcript = " ".join([i["text"] for i in t_list])
         except: pass
-
         try:
             res = requests.get(url, headers=headers, timeout=10)
             title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
-            return f"TITLE: {title}\n\nTRANSCRIPT: {transcript if transcript else 'No transcript.'}"
-        except:
-            return "YouTube Meta Fetch Failed."
-
+            return f"TITLE: {title}\n\nTRANSCRIPT: {transcript}"
+        except: return "Error fetching YouTube metadata."
+    
+    # Vimeo Logic (Using API)
+    if "vimeo.com" in url:
+        v_id = url.split("/")[-1].split("?")[0]
+        if VIMEO_TOKEN:
+            try:
+                v = vimeo.VimeoClient(token=VIMEO_TOKEN)
+                data = v.get(f'/videos/{v_id}').json()
+                return f"TITLE: {data.get('name')}\nDESC: {data.get('description')}"
+            except: pass
+        return "Vimeo API Error or Token missing."
+    
     return ""
 
-# --- UI LAYOUT ---
-st.title("🎥 Video AI Researcher Pro")
-st.markdown("Generate summaries and Catholic/Social themes from links or manual text.")
+# --- Session State for Reset ---
+if 'url' not in st.session_state: st.session_state.url = ""
+if 'transcript' not in st.session_state: st.session_state.transcript = ""
 
+def reset_fields():
+    st.session_state.url = ""
+    st.session_state.transcript = ""
+
+# --- UI Layout ---
+st.title("🎥 Video Summarizer Pro")
+
+# Aligned input columns
 col1, col2 = st.columns(2)
-
 with col1:
-    url_input = st.text_input("🔗 Video Link (YouTube/Vimeo/ShalomWorld):")
-
+    url_input = st.text_input("🔗 Video Link:", value=st.session_state.url, key="url_box")
 with col2:
-    manual_desc = st.text_area("📝 Manual Description/Transcript:", placeholder="Paste text here if the link fails or is private...")
+    manual_desc = st.text_area("📝 Manual Content:", value=st.session_state.transcript, key="trans_box")
 
-if st.button("🚀 Analyze & Generate"):
+# Action Buttons
+btn_col1, btn_col2, btn_col3 = st.columns([1,1,1])
+with btn_col1:
+    analyze_btn = st.button("🚀 Analyze Video", use_container_width=True)
+with btn_col2:
+    reset_btn = st.button("🔄 Reset Fields", on_click=reset_fields, use_container_width=True)
+
+if analyze_btn:
     if not url_input and not manual_desc:
-        st.warning("Please provide either a video link or a description.")
-    elif not GEMINI_API_KEY:
-        st.error("Gemini API Key missing! Check Streamlit Secrets.")
+        st.warning("Please provide a link or text.")
     else:
-        with st.spinner("Processing data..."):
-            # 1. Get automated data
-            auto_data = get_video_content(url_input) if url_input else ""
-            
-            # 2. Combine with manual data
-            combined_context = f"{auto_data}\n\nMANUAL USER DATA: {manual_desc}"
+        with st.spinner("Processing..."):
+            fetched_data = get_video_content(url_input) if url_input else ""
+            combined = f"{fetched_data}\n\nMANUAL: {manual_desc}"
             
             try:
-                client = genai.Client(api_key=GEMINI_API_KEY)
+                client = genai.Client(api_key=API_KEY)
+                sum_res = client.models.generate_content(model=MODEL_ID, contents=f"Summarize in 3 bullets:\n\n{combined}").text
                 
-                # --- SUMMARY CALL ---
-                sum_res = client.models.generate_content(
-                    model=MODEL_ID,
-                    contents=f"Summarize the video in 3 concise bullet points:\n\n{combined_context}"
-                )
+                theme_prompt = f"Extract 5 keywords (Catholic/Social themes) from this: {sum_res}. Output only keywords separated by commas."
+                keywords = client.models.generate_content(model=MODEL_ID, contents=theme_prompt).text
                 
-                # --- THEMES CALL ---
-                theme_prompt = f"""
-                Extract 5 keywords from this summary. 
-                Prioritize: 
-                1. Catholic Liturgical times (Christmas, Lent, etc.)
-                2. Catholic Spiritual themes (Eucharist, Martyrdom, etc.)
-                3. Social/Family themes (Marriage, Addiction, Pro-life, Mental Health, depression, pornography, alcoholism, divorce, etc).
-                
-                Summary: {sum_res.text}
-                Output only 5 keywords separated by commas.
-                """
-                theme_res = client.models.generate_content(model=MODEL_ID, contents=theme_prompt)
-                
-                # --- DISPLAY RESULTS ---
                 st.divider()
                 st.subheader("📋 Summary")
-                st.write(sum_res.text)
+                st.write(sum_res)
                 
                 st.subheader("🏷️ Key Themes")
-                st.info(theme_res.text)
+                st.info(keywords)
+                
+                # Copy Button
+                st.button("📋 Copy Keywords", on_click=lambda: st.write(f"Copied to clipboard: {keywords}"))
+                # Note: True browser clipboard "copy" in Streamlit often requires a custom component or clicking the text in 'st.code'. 
+                # Using st.code(keywords) is the most user-friendly way for them to copy.
+                st.code(keywords, language="text")
                 
             except Exception as e:
                 st.error(f"AI Error: {str(e)}")
