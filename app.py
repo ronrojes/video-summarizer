@@ -16,9 +16,17 @@ st.title("🎥 Video AI Researcher")
 
 def get_video_content(url):
     ydl_opts = {
-        'skip_download': True, 'quiet': True, 'noplaylist': True,
-        'extract_flat': False,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'skip_download': True, 
+        'quiet': True, 
+        'noplaylist': True,
+        # This tells Vimeo we are a real Chrome browser
+        'impersonate': 'chrome', 
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        }
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
