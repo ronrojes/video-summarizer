@@ -45,19 +45,33 @@ def get_transcript(video_id):
 
 def generate_ai_content(metadata, transcript=""):
     """One function to handle Summary + Keywords using Gemini 3.1"""
-    # Combine all available text
-    full_text = f"TITLE: {metadata['title']}\nDESC: {metadata['desc']}\nTRANSCRIPT: {transcript}"
     
-    # Summary Prompt
-    sum_prompt = f"Summarize this video in 3 distinct bullet points:\n\n{full_text}"
-    summary = client.models.generate_content(model=MODEL_ID, contents=sum_prompt).text
+    # Combine data - ensuring we have SOMETHING to send
+    content_to_analyze = f"TITLE: {metadata.get('title', 'N/A')}\n"
+    content_to_analyze += f"DESCRIPTION: {metadata.get('desc', 'N/A')}\n"
+    if transcript:
+        content_to_analyze += f"TRANSCRIPT: {transcript}"
 
-    # Keyword Prompt (Your specific themes)
-    key_prompt = (
+    # DEBUG: This will show up in your Streamlit 'Manage App' logs
+    print(f"DEBUG: Content length being sent to Gemini: {len(content_to_analyze)} chars")
+
+    if len(content_to_analyze) < 50:
+        return "Error: No sufficient video data found to summarize.", ""
+
+    # The Prompt
+    sum_prompt = f"Summarize this video content in 3 distinct bullet points:\n\n{content_to_analyze}"
+    
+    try:
+        summary_response = client.models.generate_content(model=MODEL_ID, contents=sum_prompt)
+        summary = summary_response.text
+        
+        key_prompt = (
         "Extract  keywords from this summary. Prioritize: Catholic Liturgical times (Christmas, Easter, Lent, Advent etc), "
         "Catholic Spiritual themes (Martyrdom, God's love, priesthood, pro-life, sainthood, etc), and Social/Family themes (Marriage, Family, Abortion, Mental Health, depression, addiction, pornography, abuse, alchoholism, divorce, suffering, relationship, etc).\n\n"
         f"Summary: {summary}\n\nOutput only 5 keywords separated by commas."
-    )
-    keywords = client.models.generate_content(model=MODEL_ID, contents=key_prompt).text
-    
-    return summary, keywords
+        )
+        keywords = client.models.generate_content(model=MODEL_ID, contents=key_prompt).text
+        
+        return summary, keywords
+    except Exception as e:
+        return f"AI Error: {str(e)}", ""
