@@ -17,40 +17,46 @@ st.set_page_config(page_title="Video AI Researcher", page_icon="🎥")
 st.title("🎥 Video AI Researcher")
 
 def get_video_content(url):
-    # Standard headers that look like a normal person's browser
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     }
 
+    # Step 1: Try yt-dlp first (it's best for YouTube transcripts)
     try:
-        # Step 1: Try to get basic info using yt-dlp first
         ydl_opts = {'skip_download': True, 'quiet': True, 'noplaylist': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'Unknown Title')
+            title = info.get('title', '')
             description = info.get('description', '')
             
-            # Step 2: Try for Transcript (YouTube only)
             transcript = ""
             if "youtube" in url or "youtu.be" in url:
-                video_id = info.get('id')
                 try:
+                    video_id = info.get('id')
                     t_list = YouTubeTranscriptApi.get_transcript(video_id)
                     transcript = " ".join([i["text"] for i in t_list])
                 except: pass
-
-            # Step 3: If description is empty (common on Vimeo/Cloud), 
-            # we use 'requests' to scrape the page manually as a fallback
-            if not description or len(description) < 10:
-                response = requests.get(url, headers=headers, timeout=10)
-                # This looks for the 'description' meta tag in the HTML
-                meta_desc = re.findall(r'<meta name="description" content="(.*?)">', response.text)
-                description = meta_desc[0] if meta_desc else "No description found."
-
-            return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
-
+            
+            # If we got a title, we are successful
+            if title:
+                return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
     except Exception as e:
-        return f"FETCH_ERROR: {str(e)}"
+        print(f"yt-dlp failed, switching to manual scrape: {e}")
+
+    # Step 2: MANUAL FALLBACK (The 'Vimeo Fix')
+    # If yt-dlp fails (XML error), we fetch the HTML page directly
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        # Use Regex to find Title and Description in the HTML Meta Tags
+        title_match = re.search(r'<title>(.*?)</title>', response.text)
+        desc_match = re.search(r'<meta name="description" content="(.*?)">', response.text)
+        
+        title = title_match.group(1) if title_match else "Unknown Video"
+        description = desc_match.group(1) if desc_match else "No description available."
+        
+        return f"TITLE: {title}\n\nDESC: {description}\n\nNote: Data fetched via manual scrape."
+    except Exception as e:
+        return f"FETCH_ERROR: Both yt-dlp and manual scrape failed. {str(e)}"
 
 # --- UI ---
 url_input = st.text_input("Enter Video Link:")
