@@ -18,27 +18,34 @@ def get_video_content(url):
     ydl_opts = {
         'skip_download': True, 'quiet': True, 'noplaylist': True,
         'extract_flat': False,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        }
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             video_id = info.get('id')
             title = info.get('title', 'Unknown Title')
-            description = info.get('description', 'No description found.')
+            description = info.get('description', '')
             
-            # Try to get transcript if it's YouTube
+            # FALLBACK 1: Try for the official Transcript
             transcript = ""
-            if "youtube" in url or "youtu.be" in url:
-                try:
-                    t_list = YouTubeTranscriptApi.get_transcript(video_id)
-                    transcript = " ".join([i["text"] for i in t_list])
-                except Exception as te:
-                    print(f"Transcript skipped: {te}")
-            
-            return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
+            try:
+                t_list = YouTubeTranscriptApi.get_transcript(video_id)
+                transcript = " ".join([i["text"] for i in t_list])
+            except:
+                print("Transcript blocked or unavailable.")
+
+            # FALLBACK 2: If no transcript, use the Description
+            # FALLBACK 3: If no description, use the Title
+            final_text = f"TITLE: {title}\n\n"
+            if transcript:
+                final_text += f"TRANSCRIPT: {transcript}"
+            elif description and len(description) > 20:
+                final_text += f"DESCRIPTION: {description}"
+            else:
+                final_text += "No detailed text found. Please summarize based on the title alone."
+
+            return final_text
     except Exception as e:
         return f"FETCH_ERROR: {str(e)}"
 
