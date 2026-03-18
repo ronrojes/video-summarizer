@@ -21,14 +21,15 @@ def get_video_content(url):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     }
 
-    # Step 1: Try yt-dlp first (it's best for YouTube transcripts)
+    # Try standard extraction first
     try:
         ydl_opts = {'skip_download': True, 'quiet': True, 'noplaylist': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            title = info.get('title', '')
+            title = info.get('title')
             description = info.get('description', '')
             
+            # YouTube specific transcript logic
             transcript = ""
             if "youtube" in url or "youtu.be" in url:
                 try:
@@ -37,26 +38,30 @@ def get_video_content(url):
                     transcript = " ".join([i["text"] for i in t_list])
                 except: pass
             
-            # If we got a title, we are successful
             if title:
                 return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
     except Exception as e:
-        print(f"yt-dlp failed, switching to manual scrape: {e}")
+        # This is where the XML error is caught
+        print(f"Standard extractor failed: {e}")
 
-    # Step 2: MANUAL FALLBACK (The 'Vimeo Fix')
-    # If yt-dlp fails (XML error), we fetch the HTML page directly
+    # --- MANUAL FALLBACK (The Vimeo 'Secret Door') ---
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        # Use Regex to find Title and Description in the HTML Meta Tags
-        title_match = re.search(r'<title>(.*?)</title>', response.text)
-        desc_match = re.search(r'<meta name="description" content="(.*?)">', response.text)
+        response = requests.get(url, headers=headers, timeout=15)
         
-        title = title_match.group(1) if title_match else "Unknown Video"
-        description = desc_match.group(1) if desc_match else "No description available."
+        # We use Regex to 'pluck' the title and description from the raw HTML code
+        title_search = re.search(r'<title>(.*?)</title>', response.text)
+        # Vimeo usually hides the description in a meta tag
+        desc_search = re.search(r'<meta name="description" content="(.*?)">', response.text)
         
-        return f"TITLE: {title}\n\nDESC: {description}\n\nNote: Data fetched via manual scrape."
+        title = title_search.group(1) if title_search else "Unknown Video"
+        description = desc_search.group(1) if desc_search else "No description available in HTML."
+        
+        # Clean up any HTML entities like &amp; or &quot;
+        title = title.replace("on Vimeo", "").strip()
+        
+        return f"TITLE: {title}\n\nDESC: {description}\n\n(Note: Metadata fetched via direct HTML scrape)"
     except Exception as e:
-        return f"FETCH_ERROR: Both yt-dlp and manual scrape failed. {str(e)}"
+        return f"FETCH_ERROR: Both standard and manual fetch failed. {str(e)}"
 
 # --- UI ---
 url_input = st.text_input("Enter Video Link:")
