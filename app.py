@@ -40,29 +40,32 @@ def clean_youtube_url(url):
 def get_video_content(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
     
-    # LOGIC: Use Regex to grab ONLY the 11-character ID. 
-    # This ignores &list=, &index=, and &start_radio=
+    # LOGIC: This regex finds exactly the 11-character ID
+    # It works for youtube.com/watch?v=ID and youtu.be/ID
     v_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
     
     if v_id_match:
         v_id = v_id_match.group(1)
         
-        # 1. Fetch Transcript using ONLY the isolated ID
+        # 1. Fetch Transcript using ONLY the 11-character ID
         transcript = ""
         try:
+            # Passing the full URL here is what causes the "Not Working" error
             t_list = YouTubeTranscriptApi.get_transcript(v_id)
             transcript = " ".join([i["text"] for i in t_list])
         except Exception:
-            pass
+            transcript = "No transcript available."
 
-        # 2. Fetch Title using a "Clean" URL (no playlist parameters)
+        # 2. Fetch Title using a clean URL to avoid playlist redirects
         try:
             clean_url = f"https://www.youtube.com/watch?v={v_id}"
             res = requests.get(clean_url, headers=headers, timeout=10)
             title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
             return f"TITLE: {title}\n\nCONTENT: {transcript}"
         except Exception:
-            return "YouTube Meta Fetch Error."
+            return "YouTube Metadata Error."
+            
+    return "Invalid YouTube URL."
 
     # Vimeo Logic
     if "vimeo.com" in url:
