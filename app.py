@@ -1,112 +1,87 @@
 import streamlit as st
-import requests
-import re
 import os
-from urllib.parse import urlparse, parse_qs
+import yt_dlp
 from google import genai
-from youtube_transcript_api import YouTubeTranscriptApi
-from dotenv import load_dotenv
 
-load_dotenv()
+# --- Setup & Config ---
+# Streamlit Cloud uses st.secrets. Locally, it will look for .streamlit/secrets.toml
+API_KEY = st.secrets.get("GEMINI_API_KEY")
+MODEL_ID = "gemini-3.1-flash-lite-preview"
 
-# --- CONFIG & API SETUP ---
-API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-# Change this line:
-MODEL_ID = "gemini-2.0-flash-lite-preview" # Updated to latest stable flash
+# Page Configuration
+st.set_page_config(page_title="Video Summarizer Pro", page_icon="🎥")
+st.title("🎥 Video Summarizer")
+st.markdown("Enter a video link to get a 3-bullet summary and key themes.")
 
-st.set_page_config(page_title="Video AI Researcher", page_icon="🎥")
-st.title("🎥 Video AI Researcher")
-
-# --- DATA FETCHING LOGIC ---
+# --- Logic Functions ---
 def get_video_content(url):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    ydl_opts = {
+        'skip_download': True, 
+        'quiet': True, 
+        'noplaylist': True,
+        'extractor_args': {'vimeo': {'player_client': ['web']}},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        }
     }
-
-    # 1. Transform Vimeo Player links to standard links
-    if "player.vimeo.com/video/" in url:
-        v_id = url.split("/")[-1].split("?")[0]
-        url = f"https://vimeo.com/{v_id}"
-
-    # 2. YouTube Logic (Lightweight)
-    if "youtube.com" in url or "youtu.be" in url:
-        v_id = ""
-        if "youtu.be" in url:
-            v_id = url.split("/")[-1]
-        else:
-            query = urlparse(url).query
-            v_id = parse_qs(query).get("v", [""])[0]
-
-        transcript = ""
-        try:
-            t_list = YouTubeTranscriptApi.get_transcript(v_id)
-            transcript = " ".join([i["text"] for i in t_list])
-        except:
-            pass
-
-        try:
-            res = requests.get(url, headers=headers, timeout=15)
-            title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
-            return f"TITLE: {title}\n\nTRANSCRIPT: {transcript if transcript else 'No transcript available.'}"
-        except:
-            return "FETCH_ERROR: YouTube connection failed."
-
-    # 3. Vimeo Logic (HTML Scrape)
-    if "vimeo.com" in url:
-        try:
-            res = requests.get(url, headers=headers, timeout=15)
-            title_m = re.search(r'<title>(.*?)</title>', res.text)
-            desc_m = re.search(r'<meta name="description" content="(.*?)">', res.text)
-            title = title_m.group(1).replace("on Vimeo", "").strip() if title_m else "Vimeo Video"
-            description = desc_m.group(1) if desc_m else "No description."
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title', 'Unknown Title')
+            description = info.get('description', 'No description available.')
             return f"TITLE: {title}\n\nDESCRIPTION: {description}"
-        except:
-            return "FETCH_ERROR: Vimeo connection failed."
+    except Exception as e:
+        st.error(f"Fetcher Error: {str(e)}")
+        return None
 
-    return "FETCH_ERROR: Unsupported URL."
+def process_ai(content):
+    client = genai.Client(api_key=API_KEY)
+    
+    # 1. Summary Call
+    sum_prompt = f"Summarize the video in 3 distinct bullet points based on this information:\n\n{content}"
+    sum_res = client.models.generate_content(model=MODEL_ID, contents=sum_prompt)
+    summary_text = sum_res.text
+    
+    # 2. Keyword Call
+    key_prompt = (
+        "Extract 5 keywords from this video summary. Prioritize: Catholic Liturgical times (Christmas, Lent, Advent, etc.), "
+        "Catholic Spiritual themes (Martyrdom, Suffering, God's love, Eucharist, etc.), and Social/Family themes "
+        "(Family life, Divorce, Addiction, Abortion, Pro-life, Alchohol Addiction, Porn Addiction, Sexual Addiction, "
+        "Pornography, Abuse, Mental Health, etc.).\n\n"
+        f"Summary: {summary_text}\n\nOutput only 5 keywords separated by commas."
+    )
+    key_res = client.models.generate_content(model=MODEL_ID, contents=key_prompt)
+    keywords_text = key_res.text
+    
+    return summary_text, keywords_text
 
-# --- USER INTERFACE ---
-url_input = st.text_input("Paste YouTube or Vimeo URL here:")
+# --- UI Layout ---
+message_place = st.empty()
 
-if st.button("Generate Summary"):
+url_input = st.text_input("Paste Video Link here:", placeholder="https://youtube.com/watch?v=...")
+
+if st.button("Analyze Video"):
+    message_place.empty()
+    
     if not url_input:
-        st.warning("Please provide a link first.")
+        message_place.warning("Please enter a URL first.")
     elif not API_KEY:
-        st.error("API Key missing! Check Streamlit Secrets.")
+        message_place.error("API Key missing! Please add GEMINI_API_KEY to your Streamlit Secrets.")
     else:
-        with st.spinner("Analyzing video data..."):
-            raw_data = get_video_content(url_input)
+        with st.spinner("Fetching video data and thinking..."):
+            video_text = get_video_content(url_input)
             
-            if "FETCH_ERROR" in raw_data:
-                st.error(raw_data)
-            else:
+            if video_text:
                 try:
-                    client = genai.Client(api_key=API_KEY)
+                    summary, keywords = process_ai(video_text)
                     
-                    # 1. Generate Summary
-                    sum_res = client.models.generate_content(
-                        model=MODEL_ID,
-                        contents=f"Summarize this video in 3 concise bullet points:\n\n{raw_data}"
-                    )
                     st.subheader("📋 Summary")
-                    st.write(sum_res.text)
-
-                    # 2. Generate Themes (Your custom logic)
-                    theme_prompt = f"""
-                    Extract 5 keywords from this summary. 
-                    Prioritize: 
-                    1. Catholic Liturgical times (Christmas, Easter, Lent, etc.)
-                    2. Catholic Spiritual themes (Martyrdom, priesthood, pro-life, etc.)
-                    3. Social/Family themes (Marriage, Mental Health, addiction, etc.)
-
-                    Summary: {sum_res.text}
+                    st.write(summary)
                     
-                    Output only 5 keywords separated by commas.
-                    """
+                    st.subheader("🏷️ Key Themes")
+                    # Using st.info makes the keywords look like tags
+                    st.info(keywords)
                     
-                    theme_res = client.models.generate_content(model=MODEL_ID, contents=theme_prompt)
-                    st.subheader("🏷️ Themes")
-                    st.info(theme_res.text)
-
-                except Exception as e:
-                    st.error(f"AI Error: {str(e)}")
+                    st.success("Analysis complete!")
+                except Exception as ai_err:
+                    st.error(f"AI Error: {str(ai_err)}")
