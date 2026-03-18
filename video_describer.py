@@ -15,15 +15,19 @@ MODEL_ID = "gemini-3.1-flash-lite-preview" # The 2026 Lite model
 client = genai.Client(api_key=API_KEY)
 
 def get_video_data(url):
-    """Fetches title and description using yt-dlp (works for both YT and Vimeo)"""
     ydl_opts = {
-        'skip_download': True, 'quiet': True, 'noplaylist': True,
-        'extractor_args': {'vimeo': {'player_client': ['web']}}, # Vimeo 2026 Fix
+        'skip_download': True, 
+        'quiet': True, 
+        'noplaylist': True,
+        # Use a more generic impersonate target for cloud environments
+        'impersonate': 'chrome-110', 
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Referer': 'https://vimeo.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         }
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
