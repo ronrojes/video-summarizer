@@ -12,7 +12,7 @@ load_dotenv()
 # --- CONFIG & API SETUP ---
 API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 # Change this line:
-MODEL_ID = "gemini-2.0-flash" # Updated to latest stable flash
+MODEL_ID = "gemini-2.0-flash-lite-preview" # Updated to latest stable flash
 
 st.set_page_config(page_title="Video AI Researcher", page_icon="🎥")
 st.title("🎥 Video AI Researcher")
