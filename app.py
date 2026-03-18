@@ -1,11 +1,10 @@
 import streamlit as st
-import os
 import requests
 import re
+import vimeo
 from urllib.parse import urlparse, parse_qs
 from google import genai
 from youtube_transcript_api import YouTubeTranscriptApi
-import vimeo
 
 # --- Setup & Config ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
@@ -25,30 +24,40 @@ st.markdown("""
 
 # --- Logic Functions ---
 def clean_youtube_url(url):
-    """Ensures playlist and radio parameters are removed for stable fetching."""
-    if "youtube.com/watch" in url:
-        parsed = urlparse(url)
-        v_id = parse_qs(parsed.query).get("v", [None])[0]
-        return f"https://www.youtube.com/watch?v={v_id}" if v_id else url
+    """
+    Cleans YouTube URLs to handle playlists. 
+    It extracts the Video ID and rebuilds a clean link.
+    """
+    if "youtube.com/watch" in url or "youtu.be" in url:
+        # Extract ID from standard or shortened links
+        if "v=" in url:
+            v_id = url.split("v=")[1].split("&")[0]
+        else:
+            v_id = url.split("/")[-1].split("?")[0]
+        return f"https://www.youtube.com/watch?v={v_id}"
     return url
 
 def get_video_content(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
-    url = clean_youtube_url(url)
+    clean_url = clean_youtube_url(url)
     
-    if "youtube.com" in url or "youtu.be" in url:
-        v_id = url.split("v=")[1].split("&")[0] if "v=" in url else url.split("/")[-1]
+    # YouTube Logic
+    if "youtube.com" in clean_url or "youtu.be" in clean_url:
+        v_id = clean_url.split("v=")[1]
         transcript = ""
         try:
             t_list = YouTubeTranscriptApi.get_transcript(v_id)
             transcript = " ".join([i["text"] for i in t_list])
-        except: pass
+        except Exception:
+            pass
         try:
-            res = requests.get(url, headers=headers, timeout=10)
+            res = requests.get(clean_url, headers=headers, timeout=10)
             title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
             return f"TITLE: {title}\n\nCONTENT: {transcript}"
-        except: return "YouTube Meta Fetch Error."
+        except Exception:
+            return "YouTube Meta Fetch Error."
     
+    # Vimeo Logic
     if "vimeo.com" in url:
         v_id = url.split("/")[-1].split("?")[0]
         if VIMEO_TOKEN:
@@ -56,7 +65,8 @@ def get_video_content(url):
                 v_client = vimeo.VimeoClient(token=VIMEO_TOKEN)
                 v_data = v_client.get(f'/videos/{v_id}').json()
                 return f"TITLE: {v_data.get('name')}\nDESC: {v_data.get('description')}"
-            except: pass
+            except Exception:
+                pass
         return "Vimeo Fetch Error (Token may be missing)."
     return ""
 
@@ -67,7 +77,6 @@ if 'keywords' not in st.session_state: st.session_state.keywords = ""
 def reset_all():
     st.session_state.summary = ""
     st.session_state.keywords = ""
-    # Resetting input widgets via their keys
     st.session_state.url_box = ""
     st.session_state.manual_box = ""
 
@@ -79,11 +88,11 @@ col1, col2 = st.columns(2, gap="large")
 
 with col1:
     st.subheader("🔗 Video Source")
-    url_input = st.text_input("Paste Link (YouTube, Vimeo, Shalom World):", key="url_box")
+    url_input = st.text_input("Enter Video Link):", key="url_box")
 
 with col2:
     st.subheader("📝 Additional Context")
-    manual_input = st.text_area("Paste Transcript or Description:", key="manual_box")
+    manual_input = st.text_area("Enter Transcript or Description:", key="manual_box")
 
 btn_col1, btn_col2 = st.columns([2, 1])
 with btn_col1:
@@ -111,9 +120,9 @@ if analyze:
                 theme_prompt = f"""
                 Extract exactly 5 keywords from the following summary. 
                 Prioritize: 
-                - Catholic Liturgical times (Christmas, Lent, etc.)
-                - Catholic Spiritual themes (Eucharist, Suffering, God's love, etc.)
-                - Social/Family themes (Pro-life, Addiction, Mental Health, etc.)
+                - Catholic Liturgical times (Christmas, Lent, Advent, etc.)
+                - Catholic Spiritual themes (Eucharist, Martyrdom, Suffering, God's love, etc.)
+                - Social/Family themes (Pro-life, Addiction, Mental Health, Abuse, etc.)
                 
                 Summary: {st.session_state.summary}
                 
@@ -124,20 +133,19 @@ if analyze:
             except Exception as e:
                 st.error(f"⚠️ AI Engine Error: {str(e)}")
 
-# --- Results Display ---
-# By displaying from session_state, data remains visible after clicking 'Copy'
+# --- Results Display (Rearranged) ---
 if st.session_state.summary:
     st.divider()
-    res_col1, res_col2 = st.columns([2, 1], gap="medium")
     
-    with res_col1:
-        st.subheader("📋 Executive Summary")
-        st.write(st.session_state.summary)
+    # Summary Section (Full Width)
+    st.subheader("📋 Executive Summary")
+    st.write(st.session_state.summary)
     
-    with res_col2:
-        st.subheader("🏷️ Tagging & Themes")
-        # st.code provides a built-in copy button and prevents duplicate displays
-        st.code(st.session_state.keywords, language="text")
-        st.caption("Click the icon in the top-right of the box above to copy.")
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Keywords Section (Below Summary)
+    st.subheader("🏷️ Tagging & Themes")
+    st.code(st.session_state.keywords, language="text")
+    st.caption("Click the icon in the top-right of the box above to copy these tags.")
     
     st.success("Analysis complete!")
