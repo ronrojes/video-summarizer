@@ -3,3 +3,4 @@ yt-dlp
 google-genai
 python-dotenv
 youtube-transcript-api
+requests

@@ -4,6 +4,8 @@ import os
 from google import genai
 from youtube_transcript_api import YouTubeTranscriptApi
 from dotenv import load_dotenv
+import requests
+import re
 
 load_dotenv()
 
@@ -15,23 +17,38 @@ st.set_page_config(page_title="Video AI Researcher", page_icon="🎥")
 st.title("🎥 Video AI Researcher")
 
 def get_video_content(url):
-    # We removed 'impersonate': 'chrome' to avoid the dependency error
-    ydl_opts = {
-        'skip_download': True, 
-        'quiet': True, 
-        'noplaylist': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Connection': 'keep-alive',
-        }
+    # Standard headers that look like a normal person's browser
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     }
+
     try:
+        # Step 1: Try to get basic info using yt-dlp first
+        ydl_opts = {'skip_download': True, 'quiet': True, 'noplaylist': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            # ... rest of your existing logic to get title/desc ...
-            return f"TITLE: {info.get('title')}\n\nDESC: {info.get('description')}"
+            title = info.get('title', 'Unknown Title')
+            description = info.get('description', '')
+            
+            # Step 2: Try for Transcript (YouTube only)
+            transcript = ""
+            if "youtube" in url or "youtu.be" in url:
+                video_id = info.get('id')
+                try:
+                    t_list = YouTubeTranscriptApi.get_transcript(video_id)
+                    transcript = " ".join([i["text"] for i in t_list])
+                except: pass
+
+            # Step 3: If description is empty (common on Vimeo/Cloud), 
+            # we use 'requests' to scrape the page manually as a fallback
+            if not description or len(description) < 10:
+                response = requests.get(url, headers=headers, timeout=10)
+                # This looks for the 'description' meta tag in the HTML
+                meta_desc = re.findall(r'<meta name="description" content="(.*?)">', response.text)
+                description = meta_desc[0] if meta_desc else "No description found."
+
+            return f"TITLE: {title}\n\nDESC: {description}\n\nTRANSCRIPT: {transcript}"
+
     except Exception as e:
         return f"FETCH_ERROR: {str(e)}"
 
