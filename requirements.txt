@@ -1,6 +1,6 @@
 streamlit
 yt_dlp
 google-genai
-vimeo
+PyVimeo
 requests
 pysocks
