@@ -5,6 +5,7 @@ import vimeo
 from urllib.parse import urlparse, parse_qs
 from google import genai
 from youtube_transcript_api import YouTubeTranscriptApi
+import yt_dlp
 
 # --- Setup & Config ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
@@ -22,50 +23,44 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- Logic Functions ---
-def clean_youtube_url(url):
-    """
-    Cleans YouTube URLs to handle playlists. 
-    It extracts the Video ID and rebuilds a clean link.
-    """
-    if "youtube.com/watch" in url or "youtu.be" in url:
-        # Extract ID from standard or shortened links
-        if "v=" in url:
-            v_id = url.split("v=")[1].split("&")[0]
-        else:
-            v_id = url.split("/")[-1].split("?")[0]
-        return f"https://www.youtube.com/watch?v={v_id}"
-    return url
-
 def get_video_content(url):
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    # Determine if it's YouTube to apply specific playlist logic
+    is_youtube = "youtube.com" in url or "youtu.be" in url
     
-    # LOGIC: This regex finds exactly the 11-character ID
-    # It works for youtube.com/watch?v=ID and youtu.be/ID
-    v_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
-    
-    if v_id_match:
-        v_id = v_id_match.group(1)
-        
-        # 1. Fetch Transcript using ONLY the 11-character ID
-        transcript = ""
-        try:
-            # Passing the full URL here is what causes the "Not Working" error
-            t_list = YouTubeTranscriptApi.get_transcript(v_id)
-            transcript = " ".join([i["text"] for i in t_list])
-        except Exception:
-            transcript = "No transcript available."
+    ydl_opts = {
+        'skip_download': True, 
+        'quiet': True, 
+        # LOGIC: This tells yt-dlp to ignore the rest of the playlist
+        'noplaylist': True,
+        'playlist_items': '1' if is_youtube else None, 
+        'extract_flat': False,
+        'extractor_args': {'vimeo': {'player_client': ['web']}},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        }
+    }
 
-        # 2. Fetch Title using a clean URL to avoid playlist redirects
-        try:
-            clean_url = f"https://www.youtube.com/watch?v={v_id}"
-            res = requests.get(clean_url, headers=headers, timeout=10)
-            title = re.search(r'<title>(.*?)</title>', res.text).group(1).replace(" - YouTube", "")
-            return f"TITLE: {title}\n\nCONTENT: {transcript}"
-        except Exception:
-            return "YouTube Metadata Error."
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # extract_info handles the 'Radio' and 'Playlist' parameters by 
+            # isolating the specific video metadata
+            info = ydl.extract_info(url, download=False)
             
-    return "Invalid YouTube URL."
+            # If it's a playlist, yt-dlp puts the video in an 'entries' list
+            video_data = info['entries'][0] if 'entries' in info else info
+            
+            title = video_data.get('title', 'Unknown Title')
+            description = video_data.get('description', 'No description available.')
+            
+            # Note: yt-dlp fetches Title/Desc. If you need the full Transcript, 
+            # we can still call YouTubeTranscriptApi using the ID found in video_data.
+            return f"TITLE: {title}\n\nDESCRIPTION: {description}"
+            
+    except Exception as e:
+        # If YouTube blocks the Cloud IP, this catch lets you know
+        if "Sign in to confirm" in str(e):
+            return "❌ YouTube blocked this request (Cloud IP issue). Please use the Manual Content box."
+        return f"Fetcher Error: {str(e)}"
 
     # Vimeo Logic
     if "vimeo.com" in url:
@@ -112,6 +107,10 @@ with btn_col2:
 
 # --- Analysis Logic ---
 if analyze:
+    # Check a "Safety Switch" you can toggle in your Secrets
+    if st.secrets.get("STOP_APP") == "TRUE":
+        st.error("Budget reached. App is temporarily disabled to prevent charges.")
+        st.stop()
     if not url_input and not manual_input:
         st.warning("Please provide a video link or manual text to begin.")
     else:

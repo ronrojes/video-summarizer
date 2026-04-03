@@ -1,6 +1,6 @@
 streamlit
+yt_dlp
 google-genai
-python-dotenv
-youtube-transcript-api
-PyVimeo
+vimeo
 requests
+pysocks
