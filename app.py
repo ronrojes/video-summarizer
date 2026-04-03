@@ -4,7 +4,6 @@ import re
 import vimeo
 from urllib.parse import urlparse, parse_qs
 from google import genai
-from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
 
 # --- Setup & Config ---
