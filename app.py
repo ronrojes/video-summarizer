@@ -25,47 +25,48 @@ st.markdown("""
 VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN")
 
 def get_video_content(url):
-    # --- 1. VIMEO LOGIC (Using the API Key for Private Videos) ---
-    if "vimeo.com" in url:
-        # Extract ID from any Vimeo link (standard or player embed)
-        v_id_match = re.search(r"video/(\d+)|vimeo\.com/(\d+)", url)
-        if not v_id_match:
-            return "Invalid Vimeo URL."
-        
-        v_id = v_id_match.group(1) or v_id_match.group(2)
-        
-        try:
-            client = vimeo.VimeoClient(token=VIMEO_TOKEN)
-            # Fetch metadata directly from the API
-            response = client.get(f'/videos/{v_id}').json()
-            
-            if 'name' in response:
-                title = response.get('name', 'Unknown Title')
-                description = response.get('description', 'No description available.')
-                return f"TITLE: {title}\n\nDESCRIPTION: {description}"
-            else:
-                return "Vimeo API Error: Video not found or Token lacks permissions."
-        except Exception as e:
-            return f"Vimeo API Exception: {str(e)}"
-
-    # --- 2. YOUTUBE LOGIC (Using yt-dlp) ---
+    # --- 1. YOUTUBE SANITIZATION (Fixes Playlist/Radio Links) ---
     if "youtube.com" in url or "youtu.be" in url:
-        ydl_opts = {
-            'skip_download': True, 
-            'quiet': True, 
-            'noplaylist': True,
-            'playlist_items': '1',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
-            }
+        yt_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
+        if yt_id_match:
+            # Rebuild clean URL to force yt-dlp to ignore the playlist
+            url = f"https://www.youtube.com/watch?v={yt_id_match.group(1)}"
+
+    # --- 2. VIMEO PRIVATE LOGIC (Handles player.vimeo.com and vimeo.com) ---
+    if "vimeo.com" in url:
+        # This Regex captures the ID from player embeds OR standard links
+        v_id_match = re.search(r"video/(\d+)|vimeo\.com/(\d+)", url)
+        if v_id_match:
+            v_id = v_id_match.group(1) or v_id_match.group(2)
+            try:
+                # API Call using your VIMEO_TOKEN secret
+                client = vimeo.VimeoClient(token=st.secrets.get("VIMEO_TOKEN"))
+                response = client.get(f'/videos/{v_id}').json()
+                if 'name' in response:
+                    return f"TITLE: {response.get('name')}\n\nDESCRIPTION: {response.get('description')}"
+            except Exception as e:
+                return f"Vimeo API Error: {str(e)}"
+
+    # --- 3. UNIVERSAL FETCHING (yt-dlp for YouTube/Public Vimeo) ---
+    ydl_opts = {
+        'skip_download': True, 
+        'quiet': True, 
+        'noplaylist': True, 
+        'playlist_items': '1', 
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
         }
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                video_data = info['entries'][0] if 'entries' in info else info
-                return f"TITLE: {video_data.get('title')}\n\nDESCRIPTION: {video_data.get('description')}"
-        except Exception as e:
-            return f"YouTube Fetcher Error: {str(e)}"
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            video_data = info['entries'][0] if 'entries' in info else info
+            return f"TITLE: {video_data.get('title')}\n\nDESCRIPTION: {video_data.get('description')}"
+    except Exception as e:
+        if "Sign in to confirm" in str(e):
+            return "⚠️ YouTube blocked this Cloud IP. Use Manual Content."
+        return f"Fetcher Error: {str(e)}"
 
     return ""
 
