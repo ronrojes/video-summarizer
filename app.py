@@ -1,5 +1,4 @@
 import streamlit as st
-import requests
 import re
 import vimeo
 from urllib.parse import urlparse, parse_qs
@@ -22,56 +21,52 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# Get your token from secrets
+VIMEO_TOKEN = st.secrets.get("VIMEO_TOKEN")
+
 def get_video_content(url):
-    # Determine if it's YouTube to apply specific playlist logic
-    is_youtube = "youtube.com" in url or "youtu.be" in url
-    
-    ydl_opts = {
-        'skip_download': True, 
-        'quiet': True, 
-        # LOGIC: This tells yt-dlp to ignore the rest of the playlist
-        'noplaylist': True,
-        'playlist_items': '1' if is_youtube else None, 
-        'extract_flat': False,
-        'extractor_args': {'vimeo': {'player_client': ['web']}},
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        }
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # extract_info handles the 'Radio' and 'Playlist' parameters by 
-            # isolating the specific video metadata
-            info = ydl.extract_info(url, download=False)
-            
-            # If it's a playlist, yt-dlp puts the video in an 'entries' list
-            video_data = info['entries'][0] if 'entries' in info else info
-            
-            title = video_data.get('title', 'Unknown Title')
-            description = video_data.get('description', 'No description available.')
-            
-            # Note: yt-dlp fetches Title/Desc. If you need the full Transcript, 
-            # we can still call YouTubeTranscriptApi using the ID found in video_data.
-            return f"TITLE: {title}\n\nDESCRIPTION: {description}"
-            
-    except Exception as e:
-        # If YouTube blocks the Cloud IP, this catch lets you know
-        if "Sign in to confirm" in str(e):
-            return "❌ YouTube blocked this request (Cloud IP issue). Please use the Manual Content box."
-        return f"Fetcher Error: {str(e)}"
-
-    # Vimeo Logic
+    # --- 1. VIMEO LOGIC (Using the API Key for Private Videos) ---
     if "vimeo.com" in url:
-        v_id = url.split("/")[-1].split("?")[0]
-        if VIMEO_TOKEN:
-            try:
-                v_client = vimeo.VimeoClient(token=VIMEO_TOKEN)
-                v_data = v_client.get(f'/videos/{v_id}').json()
-                return f"TITLE: {v_data.get('name')}\nDESC: {v_data.get('description')}"
-            except Exception:
-                pass
-        return "Vimeo Fetch Error (Token may be missing)."
+        # Extract ID from any Vimeo link (standard or player embed)
+        v_id_match = re.search(r"video/(\d+)|vimeo\.com/(\d+)", url)
+        if not v_id_match:
+            return "Invalid Vimeo URL."
+        
+        v_id = v_id_match.group(1) or v_id_match.group(2)
+        
+        try:
+            client = vimeo.VimeoClient(token=VIMEO_TOKEN)
+            # Fetch metadata directly from the API
+            response = client.get(f'/videos/{v_id}').json()
+            
+            if 'name' in response:
+                title = response.get('name', 'Unknown Title')
+                description = response.get('description', 'No description available.')
+                return f"TITLE: {title}\n\nDESCRIPTION: {description}"
+            else:
+                return "Vimeo API Error: Video not found or Token lacks permissions."
+        except Exception as e:
+            return f"Vimeo API Exception: {str(e)}"
+
+    # --- 2. YOUTUBE LOGIC (Using yt-dlp) ---
+    if "youtube.com" in url or "youtu.be" in url:
+        ydl_opts = {
+            'skip_download': True, 
+            'quiet': True, 
+            'noplaylist': True,
+            'playlist_items': '1',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
+            }
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                video_data = info['entries'][0] if 'entries' in info else info
+                return f"TITLE: {video_data.get('title')}\n\nDESCRIPTION: {video_data.get('description')}"
+        except Exception as e:
+            return f"YouTube Fetcher Error: {str(e)}"
+
     return ""
 
 # --- Session State Management ---

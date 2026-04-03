@@ -2,5 +2,4 @@ streamlit
 yt_dlp
 google-genai
 PyVimeo
-requests
 pysocks
